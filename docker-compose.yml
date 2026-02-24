@@ -1,6 +1,7 @@
 services:
   api:
     build: .
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
     ports:
       - "8000:8000"
     depends_on:
@@ -9,6 +10,7 @@ services:
       - REDIS_HOST=redis
     volumes:
       - ./examples/uploads:/app/uploads
+      - main.py:/app/main.py
 
   worker:
     build: .
