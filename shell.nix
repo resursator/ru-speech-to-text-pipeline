@@ -15,6 +15,7 @@ pkgs.mkShell {
     python314Packages.python-multipart
     python314Packages.redis
     python314Packages.uvicorn
+    python314Packages.python-ffmpeg
   ];
 
   shellHook = ''

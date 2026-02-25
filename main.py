@@ -14,7 +14,10 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
 @app.post("/upload")
-async def upload_audio(file: UploadFile = File(...)):
+async def upload_audio(
+    file: UploadFile = File(...),
+    callback_url: str = "None"
+):
     if not file.filename:
         raise HTTPException(status_code=400, detail="Empty filename")
 
@@ -30,7 +33,8 @@ async def upload_audio(file: UploadFile = File(...)):
         task_id=task_id,
         filename=file.filename,
         path=save_path,
-        created_at=datetime.utcnow().isoformat()
+        created_at=datetime.utcnow().isoformat(),
+        callback_url=callback_url
     )
 
     # push to redis queue

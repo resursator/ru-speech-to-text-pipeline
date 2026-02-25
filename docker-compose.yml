@@ -10,7 +10,7 @@ services:
       - REDIS_HOST=redis
     volumes:
       - ./examples/uploads:/app/uploads
-      - main.py:/app/main.py
+      - ./main.py:/app/main.py
 
   worker:
     build: .
