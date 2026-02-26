@@ -14,11 +14,14 @@ services:
 
   worker:
     build: .
-    command: python worker.py
+    command: celery -A worker worker --loglevel=info --concurrency=2
     depends_on:
       - redis
     environment:
       - REDIS_HOST=redis
+    volumes:
+      - ./examples/uploads:/app/uploads
+      - ./worker.py:/app/worker.py
 
   redis:
     image: redis:8.6-alpine

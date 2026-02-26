@@ -7,6 +7,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from redis_client import redis_client
 from config import REDIS_QUEUE, UPLOAD_DIR
 from schemas import AudioTask
+from worker import process_audio
 
 app = FastAPI(title="Audio Ingest API")
 
@@ -29,16 +30,17 @@ async def upload_audio(
         content = await file.read()
         f.write(content)
 
-    task = AudioTask(
-        task_id=task_id,
-        filename=file.filename,
-        path=save_path,
-        created_at=datetime.utcnow().isoformat(),
-        callback_url=callback_url
-    )
+    # task = AudioTask(
+    #     task_id=task_id,
+    #     filename=file.filename,
+    #     path=save_path,
+    #     created_at=datetime.utcnow().isoformat(),
+    #     callback_url=callback_url
+    # )
 
     # push to redis queue
-    redis_client.rpush(REDIS_QUEUE, json.dumps(task.model_dump()))
+    # redis_client.rpush(REDIS_QUEUE, json.dumps(task.model_dump()))
+    process_audio.delay(task_id, save_path, callback_url)
 
     return {
         "task_id": task_id,

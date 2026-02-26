@@ -6,16 +6,18 @@
 pkgs.mkShell {
   nativeBuildInputs = with pkgs; [
     ffmpeg
-    python314
-    python314Packages.pip
-    python314Packages.virtualenv
+    python313
+    python313Packages.pip
+    python313Packages.virtualenv
 
-    python314Packages.fastapi
-    python314Packages.pydantic
-    python314Packages.python-multipart
-    python314Packages.redis
-    python314Packages.uvicorn
-    python314Packages.python-ffmpeg
+    python313Packages.fastapi
+    python313Packages.pydantic
+    python313Packages.python-multipart
+    python313Packages.redis
+    python313Packages.uvicorn
+    python313Packages.python-ffmpeg
+    python313Packages.celery
+    python313Packages.requests
   ];
 
   shellHook = ''
