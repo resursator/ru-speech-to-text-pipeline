@@ -24,11 +24,14 @@ pkgs.mkShell {
     python314Packages.soundfile
 
     # GigaAM-v3 failed
-    python314Packages.hydra-core
-    python314Packages.torchcodec
-    python314Packages.sentencepiece
-    python314Packages.torchaudio
+    # python314Packages.hydra-core
+    # python314Packages.torchcodec
+    # python314Packages.sentencepiece
+    # python314Packages.torchaudio
     # python313Packages.pyannote-audio
+
+    # whisper
+    python314Packages.openai-whisper
 
     # hugginface
     inputs.huggin.legacyPackages.x86_64-linux.python314Packages.huggingface-hub
