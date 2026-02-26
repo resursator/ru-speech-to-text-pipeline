@@ -6,9 +6,20 @@ from celery import Celery, chain
 from celery.exceptions import TaskError
 import time
 from typing import Dict, Any, Optional
+import noisereduce
+import soundfile
+import torch
+import torchaudio
+import numpy as np
+from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor
 
 from config import REDIS_HOST, REDIS_PORT, UPLOAD_DIR
 from redis_client import redis_client
+
+_model = None
+_processor = None
+_device = "cuda" if torch.cuda.is_available() else "cpu"
+_torch_dtype = torch.float16 if _device == "cuda" else torch.float32
 
 # Создаем Celery приложение
 celery_app = Celery(
@@ -126,16 +137,14 @@ def denoise(self, task_data):
         base_name = os.path.splitext(input_path)[0]
         output_path = f"{base_name}_denoised.wav"
 
-        # Здесь должна быть реальная реализация шумоподавления
-        # Например, через noisereduce или внешнюю библиотеку
-        # Пока имитируем работу
-        time.sleep(2)
-
-        # Для демо просто копируем файл
-        import shutil
-        shutil.copy2(input_path, output_path)
+        audio, soundread = soundfile.read(input_path)
+        clean = noisereduce.reduce_noise(y=audio, sr=soundread)
+        soundfile.write(output_path, clean, soundread)
 
         print(f"Task {task_id}: denoised {input_path} -> {output_path}")
+
+        # Удаляем временный файл
+        os.remove(input_path)
 
         task_data['denoised_path'] = output_path
         task_data['callback_url'] = callback_url
@@ -148,8 +157,11 @@ def denoise(self, task_data):
 @celery_app.task(bind=True, name='transcribe')
 def transcribe(self, task_data):
     """
-    Выполняет транскрибацию аудио
+    Выполняет транскрибацию аудио с помощью Qwen3-ASR.
+    Входной файл: WAV, 16 кГц, моно, очищен от шума.
     """
+    global _model, _processor, _device, _torch_dtype
+
     task_id = task_data['task_id']
     input_path = task_data.get('denoised_path', task_data.get('output_path'))
     callback_url = task_data.get('callback_url', "None")
@@ -157,16 +169,80 @@ def transcribe(self, task_data):
     update_task_status(task_id, "transcribing")
 
     try:
-        # Здесь должна быть реальная ASR модель (например, Whisper)
-        # Пока имитируем работу
-        time.sleep(3)
+        # Загружаем модель при первом вызове
+        if _model is None or _processor is None:
+            print(f"Loading Qwen3-ASR model on {_device}...")
+            model_id = "Qwen/Qwen3-ASR-1.7B"
+            _model = AutoModelForSpeechSeq2Seq.from_pretrained(
+                model_id,
+                torch_dtype=_torch_dtype,
+                low_cpu_mem_usage=True,
+                use_safetensors=True
+            ).to(_device)
+            _processor = AutoProcessor.from_pretrained(model_id)
+            print("Model loaded successfully")
 
-        # Мок-транскрипция
-        transcription = "Это пример транскрипции аудиофайла."
+        # Загружаем аудио
+        waveform, sample_rate = torchaudio.load(input_path)
+
+        # Приводим к моно, если вдруг не моно (хотя по условию должно быть)
+        if waveform.shape[0] > 1:
+            waveform = torch.mean(waveform, dim=0, keepdim=True)
+
+        # Ресемплируем до 16 кГц (на всякий случай)
+        if sample_rate != 16000:
+            resampler = torchaudio.transforms.Resample(sample_rate, 16000)
+            waveform = resampler(waveform)
+            sample_rate = 16000
+
+        # Параметры сегментирования (фиксированные)
+        chunk_length_s = 30  # длительность сегмента в секундах
+        chunk_samples = chunk_length_s * sample_rate
+        total_samples = waveform.shape[1]
+
+        transcript_parts = []
+
+        # Обрабатываем аудио сегментами
+        for start_sample in range(0, total_samples, chunk_samples):
+            end_sample = min(start_sample + chunk_samples, total_samples)
+            chunk = waveform[:, start_sample:end_sample]
+
+            # Пропускаем тишину (опционально)
+            if torch.max(torch.abs(chunk)) < 0.01:
+                continue
+
+            # Подготавливаем вход для модели
+            inputs = _processor(
+                raw_speech=chunk.squeeze().numpy(),
+                sampling_rate=sample_rate,
+                return_tensors="pt",
+                padding=True
+            ).to(_device)
+
+            # Генерируем транскрипцию
+            with torch.no_grad():
+                generated_ids = _model.generate(
+                    **inputs,
+                    max_new_tokens=256,
+                    language="ru",        # можно параметризовать, пока русский
+                    task="transcribe",
+                    num_beams=5
+                )
+
+            text = _processor.batch_decode(
+                generated_ids,
+                skip_special_tokens=True
+            )[0].strip()
+
+            if text:
+                transcript_parts.append(text)
+
+        # Объединяем все части в одну строку
+        full_transcript = " ".join(transcript_parts) if transcript_parts else ""
 
         result = {
             'task_id': task_id,
-            'transcription': transcription,
+            'transcription': full_transcript,
             'processed_files': {
                 'original': task_data.get('input_path'),
                 'converted': task_data.get('output_path'),
@@ -187,10 +263,10 @@ def transcribe(self, task_data):
         error_result = {"error": str(e)}
         update_task_status(task_id, "failed", error_result)
 
-        # Отправляем callback об ошибке
         if callback_url and callback_url != "None":
             send_callback(callback_url, task_id, "failed", error_result)
 
+        # Повторяем задачу при ошибке (до 3 попыток)
         raise self.retry(exc=e, countdown=10)
 
 @celery_app.task(name='process_audio')
@@ -201,14 +277,12 @@ def process_audio(task_id, file_path, callback_url="None"):
     update_task_status(task_id, "processing")
 
     try:
-        # Создаем цепочку задач - здесь важно не использовать .set() с kwargs
         workflow = chain(
             ffmpeg_convert.s(task_id, file_path, 'wav', callback_url),
             denoise.s(),
             transcribe.s()
         )
 
-        # Запускаем цепочку
         result = workflow.apply_async()
 
         return {

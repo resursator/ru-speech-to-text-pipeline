@@ -1,9 +1,18 @@
-FROM python:3.14-alpine
+FROM python:3.11-slim
 
 WORKDIR /app
-RUN apk add --no-cache ffmpeg
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    libsndfile1 \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG TORCH_VERSION=2.10.0+cu128
+RUN pip install --no-cache-dir [ -z "$TORCH_VERSION" ] && \
+    echo "TORCH_VERSION не задан" ||\
+    pip install --index-url https://download.pytorch.org/whl torch==${TORCH_VERSION}
+
 COPY requirements.txt .
-RUN pip install -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY *.py .
 

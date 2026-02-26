@@ -22,8 +22,19 @@ services:
     volumes:
       - ./examples/uploads:/app/uploads
       - ./worker.py:/app/worker.py
+      - qwen-models:/root/.cache/huggingface
+    devices:
+      - nvidia.com/gpu=all
 
   redis:
     image: redis:8.6-alpine
     ports:
       - "6379:6379"
+
+volumes:
+  qwen-models:
+    driver: local
+    driver_opts:
+      type: "none"
+      o: "bind"
+      device: "/home/resursator/.cache/huggingface/"
