@@ -1,0 +1,29 @@
+# CUDA-образ для ASR-сервиса (Qwen3-ASR через официальный пакет qwen-asr)
+FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+RUN apt-get update && apt-get install -y \
+    python3.11 python3.11-dev python3-pip \
+    ffmpeg libsndfile1 git \
+    && ln -sf /usr/bin/python3.11 /usr/bin/python3 \
+    && ln -sf /usr/bin/python3    /usr/bin/python \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Torch с поддержкой CUDA 12.1
+RUN pip install --upgrade pip && \
+    pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
+
+# Официальный пакет qwen-asr (включает transformers-бэкенд)
+RUN pip install qwen-asr
+
+# FastAPI / Uvicorn
+RUN pip install fastapi uvicorn[standard] python-multipart
+
+COPY asr_service.py .
+
+CMD ["uvicorn", "asr_service:app", "--host", "0.0.0.0", "--port", "8001"]

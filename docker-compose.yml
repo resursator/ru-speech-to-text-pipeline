@@ -1,6 +1,11 @@
 services:
+  # -----------------------------------------------------------------------
+  # API — приём файлов, постановка задач в очередь
+  # -----------------------------------------------------------------------
   api:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
     ports:
       - "8000:8000"
@@ -12,25 +17,56 @@ services:
       - ./examples/uploads:/app/uploads
       - ./main.py:/app/main.py
 
+  # -----------------------------------------------------------------------
+  # Worker — конвертация (ffmpeg) + шумоподавление (CPU)
+  # НЕТ GPU, НЕТ тяжёлых ML-зависимостей
+  # -----------------------------------------------------------------------
   worker:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     command: celery -A worker worker --loglevel=info --concurrency=2
     depends_on:
       - redis
+      - asr
     environment:
       - REDIS_HOST=redis
+      - ASR_SERVICE_URL=http://asr:8001
     volumes:
       - ./examples/uploads:/app/uploads
       - ./worker.py:/app/worker.py
+
+  # -----------------------------------------------------------------------
+  # ASR — GPU-контейнер с Qwen3-ASR
+  # -----------------------------------------------------------------------
+  asr:
+    build:
+      context: .
+      dockerfile: Dockerfile.asr
+    # ports:
+    #   - "8001:8001"
+    environment:
+      - ASR_MODEL_ID=Qwen/Qwen3-ASR-1.7B
+      - ASR_LANGUAGE=Russian # или "auto" для авто-определения
+      - ASR_CHUNK_S=30
+      - ASR_MAX_TOKENS=256
+    volumes:
+      - ./asr_service.py:/app/asr_service.py
       - qwen-models:/root/.cache/huggingface
     devices:
       - nvidia.com/gpu=all
 
+  # -----------------------------------------------------------------------
+  # Redis
+  # -----------------------------------------------------------------------
   redis:
-    image: redis:8.6-alpine
+    image: redis:8.0-alpine
     ports:
       - "6379:6379"
 
+# -----------------------------------------------------------------------
+# Volumes
+# -----------------------------------------------------------------------
 volumes:
   qwen-models:
     driver: local
