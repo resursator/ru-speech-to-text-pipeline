@@ -13,6 +13,42 @@ from celery.exceptions import TaskError
 from .config import REDIS_URL, ASR_SERVICE_URL, UPLOAD_DIR
 
 # ---------------------------------------------------------------------------
+# ASR health check
+# ---------------------------------------------------------------------------
+ASR_HEALTH_TIMEOUT   = int(os.getenv("ASR_HEALTH_TIMEOUT",   str(15 * 60)))  # 15 минут
+ASR_HEALTH_INTERVAL  = int(os.getenv("ASR_HEALTH_INTERVAL",  "10"))           # пауза между попытками, сек
+
+
+def _wait_for_asr(timeout: int = ASR_HEALTH_TIMEOUT, interval: int = ASR_HEALTH_INTERVAL) -> None:
+    """
+    Блокирует выполнение до тех пор, пока ASR-сервис не вернёт {"status": "ok"}
+    на GET /health. Если сервис не поднялся за `timeout` секунд — бросает RuntimeError.
+    """
+    url = f"{ASR_SERVICE_URL}/health"
+    deadline = time.monotonic() + timeout
+    attempt = 0
+
+    while time.monotonic() < deadline:
+        attempt += 1
+        try:
+            resp = requests.get(url, timeout=5)
+            if resp.status_code == 200 and resp.json().get("status") == "ok":
+                print(f"[ASR health] OK after {attempt} attempt(s)")
+                return
+            print(f"[ASR health] attempt {attempt}: status={resp.status_code}, body={resp.text[:80]}")
+        except requests.RequestException as exc:
+            print(f"[ASR health] attempt {attempt}: {exc}")
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(interval, remaining))
+
+    raise RuntimeError(
+        f"ASR service at {url} did not become healthy within {timeout} seconds"
+    )
+
+# ---------------------------------------------------------------------------
 # Celery application
 # ---------------------------------------------------------------------------
 celery_app = Celery("worker", broker=REDIS_URL, backend=REDIS_URL)
@@ -128,6 +164,16 @@ def transcribe(self, prev: Dict[str, Any]):
     task_id = prev["task_id"]
     input_path = prev["output_path"]
     callback_url = prev.get("callback_url", "")
+
+    _set_status(task_id, "waiting_for_asr")
+    try:
+        _wait_for_asr()
+    except RuntimeError as exc:
+        error = {"error": str(exc)}
+        _set_status(task_id, "failed", error)
+        _send_callback(callback_url, task_id, "failed", error)
+        raise TaskError(str(exc))
+
     _set_status(task_id, "transcribing")
     try:
         with open(input_path, "rb") as f:

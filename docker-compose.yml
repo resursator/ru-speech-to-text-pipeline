@@ -25,6 +25,8 @@ services:
       - redis
       - asr
     environment:
+      ASR_HEALTH_TIMEOUT: "900" # максимальное ожидание, сек (по умолчанию 15 мин)
+      ASR_HEALTH_INTERVAL: "10" # пауза между попытками, сек
       REDIS_HOST: redis
       ASR_SERVICE_URL: http://asr:8001
       UPLOAD_DIR: /app/uploads
