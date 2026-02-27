@@ -33,12 +33,21 @@ def _wait_for_asr(timeout: int = ASR_HEALTH_TIMEOUT, interval: int = ASR_HEALTH_
         attempt += 1
         try:
             resp = requests.get(url, timeout=5)
-            if resp.status_code == 200 and resp.json().get("status") == "ok":
+            body = resp.json() if "application/json" in resp.headers.get("content-type", "") else {}
+            asr_status = body.get("status", "")
+            if resp.status_code == 200 and asr_status == "ok":
                 print(f"[ASR health] OK after {attempt} attempt(s)")
                 return
-            print(f"[ASR health] attempt {attempt}: status={resp.status_code}, body={resp.text[:80]}")
+            if resp.status_code == 200 and asr_status == "loading":
+                print(f"[ASR health] attempt {attempt}: модель загружается, ждём…")
+            elif resp.status_code == 200 and asr_status == "error":
+                raise RuntimeError(f"ASR model failed to load: {body.get('detail', 'unknown')}")
+            else:
+                print(f"[ASR health] attempt {attempt}: HTTP {resp.status_code}, body={resp.text[:80]}")
+        except RuntimeError:
+            raise
         except requests.RequestException as exc:
-            print(f"[ASR health] attempt {attempt}: {exc}")
+            print(f"[ASR health] attempt {attempt}: недоступен — {exc}")
 
         remaining = deadline - time.monotonic()
         if remaining <= 0:

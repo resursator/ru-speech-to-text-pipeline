@@ -1,11 +1,16 @@
 """
-ASR-микросервис на базе Qwen3-ASR.
+ASR-микросервис на базе Qwen3-ASR (GPU).
 Принимает WAV (любой частоты / каналов), приводит к 16 кГц моно,
 делит на чанки и возвращает транскрипцию с временными метками.
+
+Health-эндпоинт доступен сразу при старте:
+  {"status": "loading"} — модель ещё загружается
+  {"status": "ok"}      — готов к работе
 """
 
 import os
 import tempfile
+import threading
 from contextlib import asynccontextmanager
 from typing import List, Optional
 
@@ -16,27 +21,40 @@ from pydantic import BaseModel
 from qwen_asr import Qwen3ASRModel
 
 MODEL_ID       = os.getenv("ASR_MODEL_ID", "Qwen/Qwen3-ASR-1.7B")
-LANGUAGE       = os.getenv("ASR_LANGUAGE", "Russian")   # "auto" → None
+LANGUAGE       = os.getenv("ASR_LANGUAGE", "Russian")
 CHUNK_S        = int(os.getenv("ASR_CHUNK_S", "30"))
 MAX_NEW_TOKENS = int(os.getenv("ASR_MAX_TOKENS", "256"))
 SILENCE_THRESH = float(os.getenv("ASR_SILENCE_THRESH", "0.01"))
 DEVICE         = "cuda" if torch.cuda.is_available() else "cpu"
 
 _model: Optional[Qwen3ASRModel] = None
+_model_ready = threading.Event()
+_model_error: Optional[str] = None
+
+
+def _load_model():
+    global _model, _model_error
+    try:
+        print(f"[ASR] Loading {MODEL_ID} on {DEVICE}…")
+        _model = Qwen3ASRModel.from_pretrained(
+            MODEL_ID,
+            dtype=torch.bfloat16 if DEVICE == "cuda" else torch.float32,
+            device_map=DEVICE,
+            max_inference_batch_size=8,
+            max_new_tokens=MAX_NEW_TOKENS,
+        )
+        print("[ASR] Model ready.")
+    except Exception as exc:
+        _model_error = str(exc)
+        print(f"[ASR] Model load failed: {exc}")
+    finally:
+        _model_ready.set()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _model
-    print(f"[ASR] Loading {MODEL_ID} on {DEVICE}…")
-    _model = Qwen3ASRModel.from_pretrained(
-        MODEL_ID,
-        dtype=torch.bfloat16 if DEVICE == "cuda" else torch.float32,
-        device_map=DEVICE,
-        max_inference_batch_size=8,
-        max_new_tokens=MAX_NEW_TOKENS,
-    )
-    print("[ASR] Ready.")
+    t = threading.Thread(target=_load_model, daemon=True)
+    t.start()
     yield
 
 
@@ -56,8 +74,22 @@ class TranscribeResponse(BaseModel):
     segments: List[Segment]
 
 
+@app.get("/health")
+async def health():
+    if not _model_ready.is_set():
+        return {"status": "loading", "model": MODEL_ID, "device": DEVICE}
+    if _model_error:
+        return {"status": "error", "model": MODEL_ID, "device": DEVICE, "detail": _model_error}
+    return {"status": "ok", "model": MODEL_ID, "device": DEVICE}
+
+
 @app.post("/transcribe", response_model=TranscribeResponse)
 async def transcribe(file: UploadFile = File(...), task_id: str = ""):
+    if not _model_ready.is_set():
+        raise HTTPException(status_code=503, detail="Model is still loading, retry later")
+    if _model_error:
+        raise HTTPException(status_code=503, detail=f"Model failed to load: {_model_error}")
+
     suffix = os.path.splitext(file.filename or "audio.wav")[1] or ".wav"
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp.write(await file.read())
@@ -66,11 +98,8 @@ async def transcribe(file: UploadFile = File(...), task_id: str = ""):
     try:
         waveform, sr = torchaudio.load(tmp_path)
 
-        # моно
         if waveform.shape[0] > 1:
             waveform = torch.mean(waveform, dim=0, keepdim=True)
-
-        # 16 кГц
         if sr != 16000:
             waveform = torchaudio.transforms.Resample(sr, 16000)(waveform)
             sr = 16000
@@ -107,8 +136,3 @@ async def transcribe(file: UploadFile = File(...), task_id: str = ""):
         raise HTTPException(status_code=500, detail=str(exc))
     finally:
         os.unlink(tmp_path)
-
-
-@app.get("/health")
-async def health():
-    return {"status": "ok", "model": MODEL_ID, "device": DEVICE}

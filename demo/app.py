@@ -189,7 +189,7 @@ def upload_file(audio_file, use_callback: bool):
             r = requests.post(
                 f"{API_URL}/upload",
                 files={"file": (fname, f, mime)},
-                params={"callback_url": callback_url} if callback_url else None,
+                data={"callback_url": callback_url},
                 timeout=30,
             )
         if r.status_code in (200, 202):
