@@ -1,5 +1,8 @@
 FROM python:3.11-slim
 
+ARG UID=1000
+ARG GID=1000
+
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -13,6 +16,12 @@ RUN pip install --no-cache-dir \
     python-multipart
 
 COPY asr/service_cpu.py ./asr/
+
+RUN useradd -u ${UID} -g ${GID} -m appuser \
+    && chown -R ${UID}:${GID} /app \
+    && mkdir -p /root/.cache/huggingface \
+    && chown -R ${UID}:${GID} /root/.cache
+USER appuser:appgroup
 
 CMD ["uvicorn", "asr.service_cpu:app", "--host", "0.0.0.0", "--port", "8001"]
 EXPOSE 8001

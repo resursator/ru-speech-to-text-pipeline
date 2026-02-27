@@ -5,6 +5,7 @@ services:
       context: .
       dockerfile: Dockerfile
     command: uvicorn api.main:app --host 0.0.0.0 --port 8000
+    user: "1000:100"
     ports:
       - "8000:8000"
     depends_on:
@@ -21,6 +22,7 @@ services:
       context: .
       dockerfile: Dockerfile
     command: celery -A api.tasks.celery_app worker --loglevel=info --concurrency=4
+    user: "1000:100"
     depends_on:
       - redis
       - asr
@@ -33,11 +35,12 @@ services:
     volumes:
       - uploads:/app/uploads
 
-  # ── ASR: GPU-контейнер с Qwen3-ASR ────────────────────────────────────────
+  # ── ASR: CPU-контейнер с faster-whisper ───────────────────────────────────
   asr:
     build:
       context: .
       dockerfile: Dockerfile.asr-cpu
+    user: "1000:100"
     ports:
       - "8001:8001"
     environment:
