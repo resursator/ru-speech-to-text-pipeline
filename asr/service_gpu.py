@@ -4,9 +4,11 @@ ASR-микросервис на базе Qwen3-ASR.
 делит на чанки и возвращает транскрипцию с временными метками.
 """
 
+import asyncio
 import os
 import tempfile
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import List, Optional
 
 import torch
@@ -16,7 +18,7 @@ from pydantic import BaseModel
 from qwen_asr import Qwen3ASRModel
 
 MODEL_ID       = os.getenv("ASR_MODEL_ID", "Qwen/Qwen3-ASR-1.7B")
-LANGUAGE       = os.getenv("ASR_LANGUAGE", "Russian")   # "auto" → None
+LANGUAGE       = os.getenv("ASR_LANGUAGE", "Russian")
 CHUNK_S        = int(os.getenv("ASR_CHUNK_S", "30"))
 MAX_NEW_TOKENS = int(os.getenv("ASR_MAX_TOKENS", "256"))
 SILENCE_THRESH = float(os.getenv("ASR_SILENCE_THRESH", "0.01"))
@@ -25,6 +27,9 @@ DEVICE         = "cuda" if torch.cuda.is_available() else "cpu"
 _model: Optional[Qwen3ASRModel] = None
 _model_ready = threading.Event()
 _model_error: Optional[str] = None
+
+# Однопоточный executor — инференс на GPU не рассчитан на параллельные вызовы
+_executor = ThreadPoolExecutor(max_workers=1)
 
 
 def _load_model():
@@ -46,7 +51,6 @@ def _load_model():
         _model_ready.set()
 
 
-# Запускаем загрузку модели в фоне — FastAPI стартует немедленно
 threading.Thread(target=_load_model, daemon=True).start()
 
 app = FastAPI(title="Qwen3-ASR Service")
@@ -65,14 +69,44 @@ class TranscribeResponse(BaseModel):
     segments: List[Segment]
 
 
+def _do_transcribe(tmp_path: str) -> tuple:
+    """Синхронная транскрипция — выполняется в отдельном потоке, не блокируя event loop."""
+    waveform, sr = torchaudio.load(tmp_path)
+
+    if waveform.shape[0] > 1:
+        waveform = torch.mean(waveform, dim=0, keepdim=True)
+
+    if sr != 16000:
+        waveform = torchaudio.transforms.Resample(sr, 16000)(waveform)
+        sr = 16000
+
+    total = waveform.shape[1]
+    chunk = CHUNK_S * sr
+    segments: List[Segment] = []
+    detected_lang: Optional[str] = None
+
+    for start in range(0, total, chunk):
+        end   = min(start + chunk, total)
+        piece = waveform[:, start:end]
+
+        if torch.max(torch.abs(piece)).item() < SILENCE_THRESH:
+            continue
+
+        results = _model.transcribe(
+            audio=(piece.squeeze().numpy(), sr),
+            language=LANGUAGE if LANGUAGE != "auto" else None,
+        )
+        text = (results[0].text or "").strip()
+        if detected_lang is None:
+            detected_lang = getattr(results[0], "language", None)
+        if text:
+            segments.append(Segment(start=start / sr, end=end / sr, text=text))
+
+    return segments, detected_lang
+
+
 @app.get("/health")
 async def health():
-    """
-    Отвечает немедленно:
-    - status=loading  пока модель грузится
-    - status=ready    когда модель готова к работе
-    - status=error    если загрузка провалилась
-    """
     if _model_error:
         return {"status": "error", "model": MODEL_ID, "device": DEVICE, "detail": _model_error}
     if not _model_ready.is_set():
@@ -93,38 +127,8 @@ async def transcribe(file: UploadFile = File(...), task_id: str = ""):
         tmp_path = tmp.name
 
     try:
-        waveform, sr = torchaudio.load(tmp_path)
-
-        # моно
-        if waveform.shape[0] > 1:
-            waveform = torch.mean(waveform, dim=0, keepdim=True)
-
-        # 16 кГц
-        if sr != 16000:
-            waveform = torchaudio.transforms.Resample(sr, 16000)(waveform)
-            sr = 16000
-
-        total = waveform.shape[1]
-        chunk = CHUNK_S * sr
-        segments: List[Segment] = []
-        detected_lang: Optional[str] = None
-
-        for start in range(0, total, chunk):
-            end   = min(start + chunk, total)
-            piece = waveform[:, start:end]
-
-            if torch.max(torch.abs(piece)).item() < SILENCE_THRESH:
-                continue
-
-            results = _model.transcribe(
-                audio=(piece.squeeze().numpy(), sr),
-                language=LANGUAGE if LANGUAGE != "auto" else None,
-            )
-            text = (results[0].text or "").strip()
-            if detected_lang is None:
-                detected_lang = getattr(results[0], "language", None)
-            if text:
-                segments.append(Segment(start=start / sr, end=end / sr, text=text))
+        loop = asyncio.get_event_loop()
+        segments, detected_lang = await loop.run_in_executor(_executor, _do_transcribe, tmp_path)
 
         return TranscribeResponse(
             task_id=task_id or None,

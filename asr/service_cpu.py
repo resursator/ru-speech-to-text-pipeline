@@ -4,24 +4,29 @@ ASR-микросервис на базе faster-whisper (CPU).
 транскрибирует через Whisper и возвращает сегменты с временными метками.
 """
 
+import asyncio
 import os
 import tempfile
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import List, Optional
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from faster_whisper import WhisperModel
 from pydantic import BaseModel
 
-MODEL_SIZE     = os.getenv("ASR_MODEL_SIZE", "small")   # tiny, base, small, medium, large-v3
-LANGUAGE       = os.getenv("ASR_LANGUAGE", "ru")        # None = авто-определение
-COMPUTE_TYPE   = os.getenv("ASR_COMPUTE_TYPE", "int8")  # int8 быстрее на CPU
-BEAM_SIZE      = int(os.getenv("ASR_BEAM_SIZE", "5"))
-CPU_THREADS    = int(os.getenv("ASR_CPU_THREADS", "4"))
+MODEL_SIZE   = os.getenv("ASR_MODEL_SIZE", "small")
+LANGUAGE     = os.getenv("ASR_LANGUAGE", "ru")
+COMPUTE_TYPE = os.getenv("ASR_COMPUTE_TYPE", "int8")
+BEAM_SIZE    = int(os.getenv("ASR_BEAM_SIZE", "5"))
+CPU_THREADS  = int(os.getenv("ASR_CPU_THREADS", "4"))
 
 _model: Optional[WhisperModel] = None
 _model_ready = threading.Event()
 _model_error: Optional[str] = None
+
+# Однопоточный executor — faster-whisper не thread-safe при параллельных вызовах
+_executor = ThreadPoolExecutor(max_workers=1)
 
 
 def _load_model():
@@ -42,7 +47,6 @@ def _load_model():
         _model_ready.set()
 
 
-# Запускаем загрузку модели в фоне — FastAPI стартует немедленно
 threading.Thread(target=_load_model, daemon=True).start()
 
 app = FastAPI(title="Whisper ASR Service (CPU)")
@@ -61,14 +65,23 @@ class TranscribeResponse(BaseModel):
     segments: List[Segment]
 
 
+def _do_transcribe(tmp_path: str) -> tuple:
+    """Синхронная транскрипция — выполняется в отдельном потоке, не блокируя event loop."""
+    segments_iter, info = _model.transcribe(
+        tmp_path,
+        language=LANGUAGE if LANGUAGE != "auto" else None,
+        beam_size=BEAM_SIZE,
+    )
+    segments = [
+        Segment(start=s.start, end=s.end, text=s.text.strip())
+        for s in segments_iter
+        if s.text.strip()
+    ]
+    return segments, info.language
+
+
 @app.get("/health")
 async def health():
-    """
-    Отвечает немедленно:
-    - status=loading  пока модель грузится
-    - status=ready    когда модель готова к работе
-    - status=error    если загрузка провалилась
-    """
     if _model_error:
         return {"status": "error", "model": MODEL_SIZE, "device": "cpu", "detail": _model_error}
     if not _model_ready.is_set():
@@ -89,21 +102,12 @@ async def transcribe(file: UploadFile = File(...), task_id: str = ""):
         tmp_path = tmp.name
 
     try:
-        segments_iter, info = _model.transcribe(
-            tmp_path,
-            language=LANGUAGE if LANGUAGE != "auto" else None,
-            beam_size=BEAM_SIZE,
-        )
-
-        segments: List[Segment] = [
-            Segment(start=s.start, end=s.end, text=s.text.strip())
-            for s in segments_iter
-            if s.text.strip()
-        ]
+        loop = asyncio.get_event_loop()
+        segments, language = await loop.run_in_executor(_executor, _do_transcribe, tmp_path)
 
         return TranscribeResponse(
             task_id=task_id or None,
-            language=info.language,
+            language=language,
             full_text=" ".join(s.text for s in segments),
             segments=segments,
         )
