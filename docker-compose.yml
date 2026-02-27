@@ -50,6 +50,24 @@ services:
     volumes:
       - hf-cache:/root/.cache/huggingface
 
+  # ── Demo: Gradio-стенд + callback-приёмник ────────────────────────────────
+  demo:
+    build:
+      context: .
+      dockerfile: Dockerfile.demo
+    user: "1000:100"
+    ports:
+      - "7860:7860"
+    depends_on:
+      - api
+      - asr
+    environment:
+      API_URL: http://api:8000
+      ASR_URL: http://asr:8001
+      # Публичный URL этого сервиса (для генерации callback_url)
+      # Замените на ваш реальный хост/IP если демо доступно снаружи
+      DEMO_URL: http://localhost:7860
+
   # ── Redis ──────────────────────────────────────────────────────────────────
   redis:
     image: redis:8.0-alpine

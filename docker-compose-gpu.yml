@@ -51,6 +51,22 @@ services:
     devices:
       - nvidia.com/gpu=all
 
+  # ── Demo: Gradio-стенд + callback-приёмник ────────────────────────────────
+  demo:
+    build:
+      context: .
+      dockerfile: Dockerfile.demo
+    user: "1000:100"
+    ports:
+      - "7860:7860"
+    depends_on:
+      - api
+      - asr
+    environment:
+      API_URL: http://api:8000
+      ASR_URL: http://asr:8001
+      DEMO_URL: http://demo:7860
+
   # ── Redis ──────────────────────────────────────────────────────────────────
   redis:
     image: redis:8.0-alpine
