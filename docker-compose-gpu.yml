@@ -35,15 +35,18 @@ services:
   asr:
     build:
       context: .
-      dockerfile: Dockerfile.asr-cpu
+      dockerfile: Dockerfile.asr-gpu
     ports:
       - "8001:8001"
     environment:
-      ASR_MODEL_SIZE: medium # turbo/tiny/base/small/medium/large-v3
-      ASR_LANGUAGE: ru
-      ASR_CPU_THREADS: "4"
+      ASR_MODEL_ID: Qwen/Qwen3-ASR-1.7B
+      ASR_LANGUAGE: Russian
+      ASR_CHUNK_S: "30"
+      ASR_MAX_TOKENS: "256"
     volumes:
       - hf-cache:/root/.cache/huggingface
+    devices:
+      - nvidia.com/gpu=all
 
   # ── Redis ──────────────────────────────────────────────────────────────────
   redis:
