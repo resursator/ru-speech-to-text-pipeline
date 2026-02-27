@@ -6,7 +6,7 @@ RUN apt-get update && apt-get install -y \
     libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
 
-ARG TORCH_VERSION=2.10.0+cu128
+ARG TORCH_VERSION=2.10.0
 RUN pip install --no-cache-dir [ -z "$TORCH_VERSION" ] && \
     echo "TORCH_VERSION не задан" ||\
     pip install --index-url https://download.pytorch.org/whl torch==${TORCH_VERSION}

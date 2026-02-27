@@ -173,6 +173,7 @@ def transcribe(self, task_data):
         if _model is None or _processor is None:
             print(f"Loading Qwen3-ASR model on {_device}...")
             model_id = "Qwen/Qwen3-ASR-1.7B"
+            print(f"model_id {str(model_id)}, torch_dtype {str(_torch_dtype)}, device {str(_device)}, processor {str(_processor)}")
             _model = AutoModelForSpeechSeq2Seq.from_pretrained(
                 model_id,
                 torch_dtype=_torch_dtype,
