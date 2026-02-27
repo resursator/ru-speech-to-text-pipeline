@@ -30,7 +30,11 @@ docker compose -f docker-compose.yml up --build
 curl -X POST http://localhost:8000/upload \
   -F "file=@call.mp3" \
   -F "callback_url=https://your-system.example.com/webhook"
-# можно использовать демо-стенд http://demo:7860/callback
+
+# Можно использовать демо-стенд http://demo:7860/callback для приёма уведомлений
+curl -X POST http://localhost:8000/upload \
+  -F "file=@call.mp3" \
+  -F "callback_url=http://demo:7860/callback"
 
 # Проверить статус
 curl http://localhost:8000/tasks/<task_id>
@@ -52,6 +56,11 @@ docker compose -f docker-compose-gpu.yml up --build
 curl -X POST http://localhost:8000/upload \
   -F "file=@call.mp3" \
   -F "callback_url=https://your-system.example.com/webhook"
+
+# Можно использовать демо-стенд http://demo:7860/callback для приёма уведомлений
+curl -X POST http://localhost:8000/upload \
+-F "file=@call.mp3" \
+-F "callback_url=http://demo:7860/callback"
 ```
 
 Используемая модель: `Qwen/Qwen3-ASR-1.7B` (по умолчанию). Первый запуск загружает модель (~3.5 ГБ).
@@ -74,7 +83,7 @@ Gradio-приложение для ручного тестирования се�
 |------------|-------------|----------|
 | `API_URL` | `http://api:8000` | URL основного API |
 | `ASR_URL` | `http://asr:8001` | URL ASR-сервиса (для health-check) |
-| `DEMO_URL` | `http://localhost:7860` | Публичный URL стенда (используется при генерации callback_url) |
+| `DEMO_URL` | `http://demo:7860` | внутренний URL стенда (используется при генерации callback_url) |
 
 > Если демо-стенд доступен снаружи (например, по IP или домену), укажите `DEMO_URL=http://<ваш-хост>:7860` в `docker-compose.yml`, чтобы callback-ссылка генерировалась корректно.
 
