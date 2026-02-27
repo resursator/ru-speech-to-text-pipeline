@@ -1,11 +1,9 @@
 import os
 import subprocess
 import json
-from zipfile import error
 import requests
 from celery import Celery, chain
 from celery.exceptions import TaskError
-from celery.signals import worker_process_init
 import time
 from typing import Dict, Any, Optional
 import noisereduce
@@ -14,7 +12,6 @@ import torch
 import torchaudio
 import numpy as np
 from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor
-from qwen_asr import Qwen3ASRModel
 
 from config import REDIS_HOST, REDIS_PORT, UPLOAD_DIR
 from redis_client import redis_client
@@ -23,7 +20,6 @@ _model = None
 _processor = None
 _device = "cuda" if torch.cuda.is_available() else "cpu"
 _torch_dtype = torch.float16 if _device == "cuda" else torch.float32
-_torch_model = None
 
 # Создаем Celery приложение
 celery_app = Celery(
@@ -47,8 +43,6 @@ celery_app.conf.update(
     task_default_retry_delay=5,  # задержка перед повторной попыткой
     task_max_retries=3,  # максимум 3 попытки
     task_always_eager=False,  # не выполнять задачи синхронно
-    worker_pool='prefork',  # или 'solo' для отладки
-    worker_pool_restarts=True,
 )
 
 def update_task_status(task_id: str, status: str, result: Optional[Dict[str, Any]] = None):
@@ -79,34 +73,6 @@ def send_callback(callback_url: str, task_id: str, status: str, result: Optional
             requests.post(callback_url, json=payload, timeout=5)
         except Exception as e:
             print(f"Callback failed for task {task_id}: {e}")
-
-@worker_process_init.connect()
-def init_worker_process(**kwargs):
-    """
-    load model before running tasks
-    :param kwargs:
-    :return:
-    """
-    global _torch_model, _torch_dtype, _device, _processor, _model
-    try:
-        # Загружаем модель (для каждого процесса своя)
-        print(f"Loading Qwen3-ASR model on {_device} (PID: {os.getpid()})...")
-        _model = "Qwen/Qwen3-ASR-1.7B"
-
-        # Используем стандартные классы вместо Qwen3ASRModel
-        _torch_model=Qwen3ASRModel.from_pretrained(
-            _model,
-            dtype=_torch_dtype,
-            device_map=_device,
-            max_inference_batch_size=32,
-            max_new_tokens=256,
-        )
-
-        _processor = AutoProcessor.from_pretrained(_model)
-        print(f"Model loaded successfully in process {os.getpid()}")
-    except Exception as e:
-        error_result = {"error": str(e)}
-        print(error_result)
 
 @celery_app.task(bind=True, name='convert')
 def ffmpeg_convert(self, task_id, input_path, output_format='wav', callback_url="None"):
@@ -194,7 +160,8 @@ def transcribe(self, task_data):
     Выполняет транскрибацию аудио с помощью Qwen3-ASR.
     Входной файл: WAV, 16 кГц, моно, очищен от шума.
     """
-    global _torch_model, _torch_dtype, _device, _processor, _model
+    global _model, _processor, _device, _torch_dtype
+
     task_id = task_data['task_id']
     input_path = task_data.get('denoised_path', task_data.get('output_path'))
     callback_url = task_data.get('callback_url', "None")
@@ -202,10 +169,23 @@ def transcribe(self, task_data):
     update_task_status(task_id, "transcribing")
 
     try:
+        # Загружаем модель при первом вызове
+        if _model is None or _processor is None:
+            print(f"Loading Qwen3-ASR model on {_device}...")
+            model_id = "Qwen/Qwen3-ASR-1.7B"
+            _model = AutoModelForSpeechSeq2Seq.from_pretrained(
+                model_id,
+                torch_dtype=_torch_dtype,
+                low_cpu_mem_usage=True,
+                use_safetensors=True
+            ).to(_device)
+            _processor = AutoProcessor.from_pretrained(model_id)
+            print("Model loaded successfully")
+
         # Загружаем аудио
         waveform, sample_rate = torchaudio.load(input_path)
 
-        # Приводим к моно, если вдруг не моно
+        # Приводим к моно, если вдруг не моно (хотя по условию должно быть)
         if waveform.shape[0] > 1:
             waveform = torch.mean(waveform, dim=0, keepdim=True)
 
@@ -215,8 +195,8 @@ def transcribe(self, task_data):
             waveform = resampler(waveform)
             sample_rate = 16000
 
-        # Параметры сегментирования
-        chunk_length_s = 30
+        # Параметры сегментирования (фиксированные)
+        chunk_length_s = 30  # длительность сегмента в секундах
         chunk_samples = chunk_length_s * sample_rate
         total_samples = waveform.shape[1]
 
@@ -227,7 +207,7 @@ def transcribe(self, task_data):
             end_sample = min(start_sample + chunk_samples, total_samples)
             chunk = waveform[:, start_sample:end_sample]
 
-            # Пропускаем тишину
+            # Пропускаем тишину (опционально)
             if torch.max(torch.abs(chunk)) < 0.01:
                 continue
 
@@ -241,10 +221,10 @@ def transcribe(self, task_data):
 
             # Генерируем транскрипцию
             with torch.no_grad():
-                generated_ids = _torch_model.generate(
+                generated_ids = _model.generate(
                     **inputs,
                     max_new_tokens=256,
-                    language="ru",
+                    language="ru",        # можно параметризовать, пока русский
                     task="transcribe",
                     num_beams=5
                 )
@@ -257,7 +237,7 @@ def transcribe(self, task_data):
             if text:
                 transcript_parts.append(text)
 
-        # Объединяем все части
+        # Объединяем все части в одну строку
         full_transcript = " ".join(transcript_parts) if transcript_parts else ""
 
         result = {
@@ -286,7 +266,7 @@ def transcribe(self, task_data):
         if callback_url and callback_url != "None":
             send_callback(callback_url, task_id, "failed", error_result)
 
-        # Повторяем задачу при ошибке
+        # Повторяем задачу при ошибке (до 3 попыток)
         raise self.retry(exc=e, countdown=10)
 
 @celery_app.task(name='process_audio')
