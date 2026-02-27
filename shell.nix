@@ -6,35 +6,26 @@
 pkgs.mkShell {
   nativeBuildInputs = with pkgs; [
     ffmpeg
-    python314
-    python314Packages.pip
-    python314Packages.virtualenv
-    # python314Packages.torch
-    # python314Packages.torchWithCuda
-    python314Packages.torch-bin
-    python314Packages.gradio
-    python314Packages.transformers
-    python314Packages.tokenizers
-    python314Packages.scikit-learn
-    python314Packages.librosa
-    python314Packages.flask
+    python313
+    python313Packages.pip
+    python313Packages.virtualenv
 
-    # noise clean
-    python314Packages.noisereduce
-    python314Packages.soundfile
+    python313Packages.fastapi
+    python313Packages.pydantic
+    python313Packages.python-multipart
+    python313Packages.redis
+    python313Packages.uvicorn
+    python313Packages.python-ffmpeg
+    python313Packages.celery
+    python313Packages.requests
 
-    # GigaAM-v3 failed
-    # python314Packages.hydra-core
-    # python314Packages.torchcodec
-    # python314Packages.sentencepiece
-    # python314Packages.torchaudio
-    # python313Packages.pyannote-audio
+    python313Packages.noisereduce
+    python313Packages.soundfile
 
-    # whisper
-    python314Packages.openai-whisper
-
-    # hugginface
-    inputs.huggin.legacyPackages.x86_64-linux.python314Packages.huggingface-hub
+    python313Packages.torch-bin
+    python313Packages.torchaudio
+    python313Packages.transformers
+    python313Packages.tokenizers
   ];
 
   shellHook = ''
