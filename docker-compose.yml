@@ -1,6 +1,8 @@
 services:
   # ── API: приём файлов, постановка задач в очередь ─────────────────────────
   api:
+    image: api
+    pull_policy: never
     build:
       context: .
       dockerfile: Dockerfile
@@ -19,6 +21,8 @@ services:
 
   # ── Worker: конвертация (ffmpeg) + шумоподавление + вызов ASR ─────────────
   worker:
+    image: worker
+    pull_policy: never
     build:
       context: .
       dockerfile: Dockerfile
@@ -39,6 +43,8 @@ services:
 
   # ── ASR: CPU-контейнер с faster-whisper ───────────────────────────────────
   asr:
+    image: ru-asr:cpu
+    pull_policy: never
     build:
       context: .
       dockerfile: Dockerfile.asr-cpu
@@ -55,6 +61,8 @@ services:
 
   # ── Demo: Gradio-стенд + callback-приёмник ────────────────────────────────
   demo:
+    image: demo
+    pull_policy: never
     build:
       context: .
       dockerfile: Dockerfile.demo
