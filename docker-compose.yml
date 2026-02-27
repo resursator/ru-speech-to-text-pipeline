@@ -64,9 +64,7 @@ services:
     environment:
       API_URL: http://api:8000
       ASR_URL: http://asr:8001
-      # Публичный URL этого сервиса (для генерации callback_url)
-      # Замените на ваш реальный хост/IP если демо доступно снаружи
-      DEMO_URL: http://localhost:7860
+      DEMO_URL: http://demo:7860
 
   # ── Redis ──────────────────────────────────────────────────────────────────
   redis:

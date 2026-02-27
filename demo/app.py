@@ -16,7 +16,7 @@ from typing import Optional
 import gradio as gr
 import requests
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 # ── Конфигурация ──────────────────────────────────────────────────────────────
 API_URL  = os.getenv("API_URL",  "http://api:8000")
@@ -28,9 +28,9 @@ DEMO_URL = os.getenv("DEMO_URL", "http://demo:7860")
 class TTLCache:
     def __init__(self, ttl: float = 4.0, maxsize: int = 256):
         self._cache: OrderedDict = OrderedDict()
-        self._ttl    = ttl
+        self._ttl     = ttl
         self._maxsize = maxsize
-        self._lock   = threading.Lock()
+        self._lock    = threading.Lock()
 
     def get(self, key: str):
         with self._lock:
@@ -168,12 +168,12 @@ def check_services():
 
 
 MIME_MAP = {
-    ".mp3": "audio/mpeg",       ".wav": "audio/wav",       ".ogg": "audio/ogg",
-    ".flac": "audio/flac",      ".aac": "audio/aac",       ".m4a": "audio/mp4",
-    ".wma": "audio/x-ms-wma",   ".opus": "audio/opus",
-    ".mp4": "video/mp4",        ".mkv": "video/x-matroska",".avi": "video/x-msvideo",
-    ".mov": "video/quicktime",  ".webm": "video/webm",
-    ".ts":  "video/mp2t",       ".mts": "video/mp2t",      ".m2ts": "video/mp2t",
+    ".mp3": "audio/mpeg",        ".wav": "audio/wav",        ".ogg": "audio/ogg",
+    ".flac": "audio/flac",       ".aac": "audio/aac",        ".m4a": "audio/mp4",
+    ".wma": "audio/x-ms-wma",    ".opus": "audio/opus",
+    ".mp4": "video/mp4",         ".mkv": "video/x-matroska", ".avi": "video/x-msvideo",
+    ".mov": "video/quicktime",   ".webm": "video/webm",
+    ".ts":  "video/mp2t",        ".mts": "video/mp2t",       ".m2ts": "video/mp2t",
 }
 
 def upload_file(audio_file, use_callback: bool):
@@ -217,7 +217,7 @@ def refresh_callbacks():
     return fmt_callbacks(_get_callbacks())
 
 
-# ── CSS / тема ────────────────────────────────────────────────────────────────
+# ── CSS ───────────────────────────────────────────────────────────────────────
 CSS = """
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Unbounded:wght@300;700&display=swap');
 
@@ -229,9 +229,6 @@ CSS = """
     --accent2: #7c3aed;
     --text:    #e2e8f0;
     --muted:   #64748b;
-    --green:   #22c55e;
-    --red:     #ef4444;
-    --yellow:  #eab308;
 }
 
 body, .gradio-container {
@@ -246,22 +243,6 @@ h1, h2, h3 { font-family: 'Unbounded', sans-serif !important; letter-spacing: -0
     background: var(--surface) !important;
     border: 1px solid var(--border) !important;
     border-radius: 8px !important;
-}
-
-.gr-button-primary {
-    background: linear-gradient(135deg, var(--accent2), var(--accent)) !important;
-    border: none !important;
-    color: #fff !important;
-    font-family: 'Unbounded', sans-serif !important;
-    font-size: 0.75rem !important;
-    letter-spacing: 0.05em !important;
-    text-transform: uppercase !important;
-}
-
-.gr-button-secondary {
-    background: transparent !important;
-    border: 1px solid var(--border) !important;
-    color: var(--muted) !important;
 }
 
 #header {
@@ -280,11 +261,9 @@ h1, h2, h3 { font-family: 'Unbounded', sans-serif !important; letter-spacing: -0
 """
 
 # ── Сборка интерфейса ─────────────────────────────────────────────────────────
-with gr.Blocks(
-    css=CSS,
-    title="Демо — Транскрипция аудио",
-    theme=gr.themes.Base(),
-) as demo:
+# Gradio 6: css передаётся в gr.Blocks, theme — тоже, но используем встроенный Base
+# без явного указания, чтобы избежать конфликтов версий.
+with gr.Blocks(css=CSS, title="Демо — Транскрипция аудио") as demo:
 
     gr.HTML("""
     <div id="header">
@@ -371,8 +350,6 @@ with gr.Blocks(
 
 
 # ── FastAPI: монтируем Gradio + добавляем /callback endpoint ─────────────────
-from fastapi.responses import RedirectResponse
-
 app = FastAPI()
 
 @app.post("/callback")
@@ -388,5 +365,5 @@ async def callback(request: Request):
 async def root():
     return RedirectResponse(url="/ui")
 
-# Gradio монтируем на /ui, чтобы /callback не конфликтовал с Gradio-роутами
-app = gr.mount_gradio_app(app, demo, path="/ui", default_concurrency_limit=10)
+# Градио монтируем на /ui, чтобы /callback не конфликтовал с Gradio-роутами
+app = gr.mount_gradio_app(app, demo, path="/ui")

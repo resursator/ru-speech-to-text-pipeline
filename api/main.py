@@ -2,7 +2,7 @@ import uuid
 import os
 from datetime import datetime
 
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import JSONResponse
 
 from .config import UPLOAD_DIR
@@ -17,7 +17,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 @app.post("/upload", response_model=UploadResponse, status_code=202)
 async def upload_audio(
     file: UploadFile = File(...),
-    callback_url: str = "",
+    callback_url: str = Form(""),   # Form() — читает из multipart/form-data (curl -F)
 ):
     """
     Принимает аудиофайл, сохраняет и ставит задачу на транскрипцию в очередь.

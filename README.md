@@ -30,6 +30,7 @@ docker compose -f docker-compose.yml up --build
 curl -X POST http://localhost:8000/upload \
   -F "file=@call.mp3" \
   -F "callback_url=https://your-system.example.com/webhook"
+# можно использовать демо-стенд http://demo:7860/callback
 
 # Проверить статус
 curl http://localhost:8000/tasks/<task_id>

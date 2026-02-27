@@ -17,7 +17,8 @@ RUN pip install --no-cache-dir \
 
 COPY asr/service_cpu.py ./asr/
 
-RUN useradd -u ${UID} -g ${GID} -m appuser \
+RUN groupadd -g ${GID} appgroup 2>/dev/null || true \
+    && useradd -u ${UID} -g ${GID} -m appuser \
     && chown -R ${UID}:${GID} /app \
     && mkdir -p /root/.cache/huggingface \
     && chown -R ${UID}:${GID} /root/.cache
