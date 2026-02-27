@@ -11,6 +11,7 @@ services:
     depends_on:
       - redis
     environment:
+      TZ: Europe/Moscow
       REDIS_HOST: redis
       UPLOAD_DIR: /app/uploads
     volumes:
@@ -27,6 +28,7 @@ services:
       - redis
       - asr
     environment:
+      TZ: Europe/Moscow
       REDIS_HOST: redis
       ASR_SERVICE_URL: http://asr:8001
       UPLOAD_DIR: /app/uploads
@@ -42,6 +44,7 @@ services:
     ports:
       - "8001:8001"
     environment:
+      TZ: Europe/Moscow
       ASR_MODEL_ID: Qwen/Qwen3-ASR-1.7B
       ASR_LANGUAGE: Russian
       ASR_CHUNK_S: "30"
@@ -63,6 +66,7 @@ services:
       - api
       - asr
     environment:
+      TZ: Europe/Moscow
       API_URL: http://api:8000
       ASR_URL: http://asr:8001
       DEMO_URL: http://demo:7860
@@ -72,6 +76,8 @@ services:
     image: redis:8.0-alpine
     ports:
       - "6379:6379"
+    environment:
+      TZ: Europe/Moscow
     volumes:
       - redis-data:/data
 

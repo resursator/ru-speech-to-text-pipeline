@@ -11,6 +11,7 @@ services:
     depends_on:
       - redis
     environment:
+      TZ: Europe/Moscow
       REDIS_HOST: redis
       UPLOAD_DIR: /app/uploads
     volumes:
@@ -27,6 +28,7 @@ services:
       - redis
       - asr
     environment:
+      TZ: Europe/Moscow
       ASR_HEALTH_TIMEOUT: "900" # максимальное ожидание, сек (по умолчанию 15 мин)
       ASR_HEALTH_INTERVAL: "10" # пауза между попытками, сек
       REDIS_HOST: redis
@@ -44,6 +46,7 @@ services:
     ports:
       - "8001:8001"
     environment:
+      TZ: Europe/Moscow
       ASR_MODEL_SIZE: medium # turbo/tiny/base/small/medium/large-v3
       ASR_LANGUAGE: ru
       ASR_CPU_THREADS: "4"
@@ -62,6 +65,7 @@ services:
       - api
       - asr
     environment:
+      TZ: Europe/Moscow
       API_URL: http://api:8000
       ASR_URL: http://asr:8001
       DEMO_URL: http://demo:7860
@@ -71,6 +75,8 @@ services:
     image: redis:8.0-alpine
     ports:
       - "6379:6379"
+    environment:
+      TZ: Europe/Moscow
     volumes:
       - redis-data:/data
 
