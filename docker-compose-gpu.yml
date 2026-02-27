@@ -50,7 +50,7 @@ services:
       ASR_CHUNK_S: "30"
       ASR_MAX_TOKENS: "256"
     volumes:
-      - hf-cache:/root/.cache/huggingface
+      - hf-cache:/home/appuser/.cache/huggingface
     devices:
       - nvidia.com/gpu=all
 

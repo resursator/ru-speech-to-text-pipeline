@@ -6,7 +6,7 @@ ASR-микросервис на базе Qwen3-ASR.
 
 import os
 import tempfile
-from contextlib import asynccontextmanager
+import threading
 from typing import List, Optional
 
 import torch
@@ -23,24 +23,33 @@ SILENCE_THRESH = float(os.getenv("ASR_SILENCE_THRESH", "0.01"))
 DEVICE         = "cuda" if torch.cuda.is_available() else "cpu"
 
 _model: Optional[Qwen3ASRModel] = None
+_model_ready = threading.Event()
+_model_error: Optional[str] = None
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    global _model
-    print(f"[ASR] Loading {MODEL_ID} on {DEVICE}…")
-    _model = Qwen3ASRModel.from_pretrained(
-        MODEL_ID,
-        dtype=torch.bfloat16 if DEVICE == "cuda" else torch.float32,
-        device_map=DEVICE,
-        max_inference_batch_size=8,
-        max_new_tokens=MAX_NEW_TOKENS,
-    )
-    print("[ASR] Ready.")
-    yield
+def _load_model():
+    global _model, _model_error
+    try:
+        print(f"[ASR] Loading {MODEL_ID} on {DEVICE}…")
+        _model = Qwen3ASRModel.from_pretrained(
+            MODEL_ID,
+            dtype=torch.bfloat16 if DEVICE == "cuda" else torch.float32,
+            device_map=DEVICE,
+            max_inference_batch_size=8,
+            max_new_tokens=MAX_NEW_TOKENS,
+        )
+        print("[ASR] Ready.")
+    except Exception as e:
+        _model_error = str(e)
+        print(f"[ASR] Failed to load model: {e}")
+    finally:
+        _model_ready.set()
 
 
-app = FastAPI(title="Qwen3-ASR Service", lifespan=lifespan)
+# Запускаем загрузку модели в фоне — FastAPI стартует немедленно
+threading.Thread(target=_load_model, daemon=True).start()
+
+app = FastAPI(title="Qwen3-ASR Service")
 
 
 class Segment(BaseModel):
@@ -56,8 +65,28 @@ class TranscribeResponse(BaseModel):
     segments: List[Segment]
 
 
+@app.get("/health")
+async def health():
+    """
+    Отвечает немедленно:
+    - status=loading  пока модель грузится
+    - status=ready    когда модель готова к работе
+    - status=error    если загрузка провалилась
+    """
+    if _model_error:
+        return {"status": "error", "model": MODEL_ID, "device": DEVICE, "detail": _model_error}
+    if not _model_ready.is_set():
+        return {"status": "loading", "model": MODEL_ID, "device": DEVICE}
+    return {"status": "ready", "model": MODEL_ID, "device": DEVICE}
+
+
 @app.post("/transcribe", response_model=TranscribeResponse)
 async def transcribe(file: UploadFile = File(...), task_id: str = ""):
+    if not _model_ready.is_set():
+        raise HTTPException(status_code=503, detail="Model is still loading, please retry later")
+    if _model_error:
+        raise HTTPException(status_code=500, detail=f"Model failed to load: {_model_error}")
+
     suffix = os.path.splitext(file.filename or "audio.wav")[1] or ".wav"
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp.write(await file.read())
@@ -107,8 +136,3 @@ async def transcribe(file: UploadFile = File(...), task_id: str = ""):
         raise HTTPException(status_code=500, detail=str(exc))
     finally:
         os.unlink(tmp_path)
-
-
-@app.get("/health")
-async def health():
-    return {"status": "ok", "model": MODEL_ID, "device": DEVICE}

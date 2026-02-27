@@ -1,9 +1,9 @@
 """
 Демо-стенд для Audio Transcription Service.
 - Мониторинг здоровья API и ASR сервисов
-- Загрузка файла и отслеживание задачи (polling каждые 5 сек)
+- Загрузка файла и отслеживание задачи (polling каждые 1 сек)
 - Callback-приёмник (POST /callback)
-- Кэширование статусов задач (TTL=4 сек) для снижения нагрузки на бэкенд
+- Кэширование статусов задач (TTL=1 сек) для снижения нагрузки на бэкенд
 """
 
 import os
@@ -26,7 +26,7 @@ DEMO_URL = os.getenv("DEMO_URL", "http://demo:7860")
 
 # ── Простой TTL-кэш для статусов задач ───────────────────────────────────────
 class TTLCache:
-    def __init__(self, ttl: float = 4.0, maxsize: int = 256):
+    def __init__(self, ttl: float = 1.0, maxsize: int = 256):
         self._cache: OrderedDict = OrderedDict()
         self._ttl     = ttl
         self._maxsize = maxsize
@@ -52,7 +52,7 @@ class TTLCache:
             self._cache[key] = (value, time.monotonic())
 
 
-_task_cache = TTLCache(ttl=4.0)
+_task_cache = TTLCache(ttl=1.0)
 
 # ── Хранилище callback-уведомлений (in-memory, последние 50) ─────────────────
 _callbacks: list[dict] = []
@@ -74,10 +74,17 @@ def _check_health(url: str, name: str) -> tuple[bool, str]:
     try:
         r = requests.get(f"{url}/health", timeout=3)
         if r.status_code == 200:
-            data  = r.json()
-            extra = ""
+            data   = r.json()
+            status = data.get("status", "ready")
+            extra  = ""
             if "model"  in data: extra  = f" · модель: {data['model']}"
             if "device" in data: extra += f" · устройство: {data['device']}"
+
+            if status == "loading":
+                return False, f"⏳ {name}: загружается{extra}"
+            if status == "error":
+                detail = data.get("detail", "неизвестно")
+                return False, f"🔴 {name}: ошибка загрузки — {detail}"
             return True, f"✅ {name}: работает{extra}"
         return False, f"⚠️ {name}: HTTP {r.status_code}"
     except Exception as e:
@@ -189,7 +196,7 @@ def upload_file(audio_file, use_callback: bool):
             r = requests.post(
                 f"{API_URL}/upload",
                 files={"file": (fname, f, mime)},
-                params={"callback_url": callback_url} if callback_url else None,
+                data={"callback_url": callback_url},
                 timeout=30,
             )
         if r.status_code in (200, 202):
@@ -261,8 +268,6 @@ h1, h2, h3 { font-family: 'Unbounded', sans-serif !important; letter-spacing: -0
 """
 
 # ── Сборка интерфейса ─────────────────────────────────────────────────────────
-# Gradio 6: css передаётся в gr.Blocks, theme — тоже, но используем встроенный Base
-# без явного указания, чтобы избежать конфликтов версий.
 with gr.Blocks(css=CSS, title="Демо — Транскрипция аудио") as demo:
 
     gr.HTML("""
@@ -283,6 +288,11 @@ with gr.Blocks(css=CSS, title="Демо — Транскрипция аудио"
 
     btn_refresh_health.click(check_services, outputs=[api_status, asr_status])
     demo.load(check_services, outputs=[api_status, asr_status])
+
+    # Автообновление health каждые 10 секунд
+    # (health-check делает HTTP-запросы к двум сервисам — не нужно чаще)
+    timer_health = gr.Timer(10)
+    timer_health.tick(check_services, outputs=[api_status, asr_status])
 
     gr.HTML("<hr style='border-color:#252a35; margin: 1.5rem 0'>")
 
@@ -328,8 +338,8 @@ with gr.Blocks(css=CSS, title="Демо — Транскрипция аудио"
         outputs=[task_status_box, result_box, task_ts_box],
     )
 
-    # Авто-поллинг каждые 5 секунд
-    timer_poll = gr.Timer(5)
+    # Автообновление статуса задачи каждую секунду
+    timer_poll = gr.Timer(1)
     timer_poll.tick(
         poll_status,
         inputs=[task_id_box],
@@ -344,9 +354,11 @@ with gr.Blocks(css=CSS, title="Демо — Транскрипция аудио"
     btn_cb_refresh = gr.Button("↻ Обновить ленту", variant="secondary", size="sm")
 
     btn_cb_refresh.click(refresh_callbacks, outputs=[cb_feed])
-    timer_cb = gr.Timer(5)
-    timer_cb.tick(refresh_callbacks, outputs=[cb_feed])
     demo.load(refresh_callbacks, outputs=[cb_feed])
+
+    # Автообновление callback-ленты каждую секунду (in-memory, дёшево)
+    timer_cb = gr.Timer(1)
+    timer_cb.tick(refresh_callbacks, outputs=[cb_feed])
 
 
 # ── FastAPI: монтируем Gradio + добавляем /callback endpoint ─────────────────

@@ -51,7 +51,7 @@ services:
       ASR_LANGUAGE: ru
       ASR_CPU_THREADS: "4"
     volumes:
-      - hf-cache:/root/.cache/huggingface
+      - hf-cache:/home/appuser/.cache/huggingface
 
   # ── Demo: Gradio-стенд + callback-приёмник ────────────────────────────────
   demo:
