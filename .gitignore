@@ -1,3 +1,7 @@
 examples
 venv
 __pycache__
+hf-cache/*
+!hf-cache/.gitkeep
+uploads/*
+!uploads/.gitkeep

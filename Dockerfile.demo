@@ -1,5 +1,8 @@
 FROM python:3.11-slim
 
+ARG UID=1000
+ARG GID=1000
+
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -14,9 +17,10 @@ RUN pip install --no-cache-dir \
 
 COPY demo/app.py ./demo/
 
-RUN useradd -u 1000 -g 100 -m appuser \
-    && chown -R 1000:100 /app
-USER 1000:100
+RUN groupadd -g ${GID} appgroup \
+    && useradd -u ${UID} -g ${GID} -m appuser \
+    && chown -R ${UID}:${GID} /app
+USER appuser:appgroup
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:7860/ui || exit 1

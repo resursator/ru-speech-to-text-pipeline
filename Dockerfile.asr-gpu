@@ -25,7 +25,9 @@ COPY asr/service_gpu.py ./asr/
 
 RUN groupadd -g ${GID} appgroup 2>/dev/null || true \
     && useradd -u ${UID} -g ${GID} -m appuser \
-    && chown -R ${UID}:${GID} /app
+    && mkdir -p /home/appuser/.cache/huggingface/hub \
+    && chown -R ${UID}:${GID} /app \
+    && chown -R ${UID}:${GID} /home/appuser/.cache
 USER appuser:appgroup
 
 CMD ["uvicorn", "asr.service_gpu:app", "--host", "0.0.0.0", "--port", "8001"]
